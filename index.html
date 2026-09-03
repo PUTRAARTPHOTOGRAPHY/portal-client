@@ -139,7 +139,7 @@
                 </div>
                 
                 <div class="relative z-10">
-                    <h2 class="text-2xl md:text-3xl font-bold mb-1"><span data-i18n="welcomeTitle">Hallo</span>, <span id="displayClientName" class="text-blue-400 capitalize">Kakak</span> 👋</h2>
+                    <h2 class="text-2xl md:text-3xl font-bold mb-1"><span data-i18n="welcomeTitle">Hallo</span>, <span id="displayClientName" class="text-blue-400 capitalize">Kakak</span> 窓</h2>
                     <p class="text-slate-300 text-sm md:text-base leading-relaxed" data-i18n="welcomeDesc">Selamat datang di portal seleksi foto dari {vendor}.</p>
                 </div>
                 
@@ -199,7 +199,7 @@
                         <h3 class="font-bold text-xl text-slate-800 dark:text-white flex items-center gap-2">
                             <span id="currentFolderDisplay" data-i18n="galleryTitle">Koleksi Foto</span>
                         </h3>
-                        <p class="text-sm text-slate-500 dark:text-slate-400 mt-1" data-i18n="galleryDesc">Klik gambar untuk memilih. Klik ikon 🔍 untuk perbesar & tambah catatan.</p>
+                        <p class="text-sm text-slate-500 dark:text-slate-400 mt-1" data-i18n="galleryDesc">Klik gambar untuk memilih. Klik ikon 剥 untuk perbesar & tambah catatan.</p>
                     </div>
                     <div class="flex flex-wrap items-center gap-2">
                         
@@ -406,7 +406,7 @@
                 folderTitle: "Sub-Folder Tersedia",
                 btnBackFolder: "Kembali",
                 galleryTitle: "Koleksi Foto",
-                galleryDesc: "Klik gambar untuk memilih. Klik ikon 🔍 untuk perbesar & tambah catatan.",
+                galleryDesc: "Klik gambar untuk memilih. Klik ikon 剥 untuk perbesar & tambah catatan.",
                 sortDefault: "Urutan Asli",
                 sortRandom: "Acak (Random)",
                 btnReshuffle: "Acak Lagi",
@@ -449,7 +449,7 @@
                 folderTitle: "Available Sub-Folders",
                 btnBackFolder: "Go Back",
                 galleryTitle: "Photo Collection",
-                galleryDesc: "Click an image to select. Click 🔍 to zoom & add notes.",
+                galleryDesc: "Click an image to select. Click 剥 to zoom & add notes.",
                 sortDefault: "Original Order",
                 sortRandom: "Randomize",
                 btnReshuffle: "Shuffle Again",
@@ -859,36 +859,38 @@
             if (typeof CONFIG_APP === 'undefined' || !CONFIG_APP.googleApiKey) return;
             
             const ids = Array.from(appState.selectedMap.keys());
+            let hasUpdates = false;
             
-            for (let i = 0; i < ids.length; i += 30) {
-                const chunk = ids.slice(i, i + 30);
-                const query = chunk.map(id => `id='${id}'`).join(' or ');
-                const apiUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,thumbnailLink)&key=${CONFIG_APP.googleApiKey}`;
-                
+            const fetchThumbnail = async (id) => {
+                const apiUrl = `https://www.googleapis.com/drive/v3/files/${id}?fields=id,thumbnailLink&key=${CONFIG_APP.googleApiKey}&supportsAllDrives=true`;
                 try {
                     const response = await fetch(apiUrl);
-                    const data = await response.json();
-                    
-                    if (data.files) {
-                        let isUpdated = false;
-                        data.files.forEach(f => {
-                            if (appState.selectedMap.has(f.id)) {
-                                const p = appState.selectedMap.get(f.id);
-                                p.url = f.thumbnailLink?.replace('=s220', '=s500');
-                                p.fullUrl = f.thumbnailLink?.replace('=s220', '=s1600');
-                                appState.selectedMap.set(f.id, p);
-                                isUpdated = true;
-                            }
-                        });
-                        
-                        if (isUpdated) {
-                            saveProgress();
-                            if (appState.viewMode === 'selected') renderGallery();
+                    if (response.ok) {
+                        const f = await response.json();
+                        if (f.thumbnailLink && appState.selectedMap.has(f.id)) {
+                            const p = appState.selectedMap.get(f.id);
+                            p.url = f.thumbnailLink.replace('=s220', '=s500');
+                            p.fullUrl = f.thumbnailLink.replace('=s220', '=s1600');
+                            appState.selectedMap.set(f.id, p);
+                            hasUpdates = true;
                         }
                     }
                 } catch (e) { 
-                    console.error("Gagal refresh URL foto lama:", e); 
+                    console.error("Gagal mengambil ulang URL untuk foto:", id); 
                 }
+            };
+
+            const chunkSize = 10;
+            for (let i = 0; i < ids.length; i += chunkSize) {
+                const chunk = ids.slice(i, i + chunkSize);
+                await Promise.all(chunk.map(id => fetchThumbnail(id)));
+                
+                if (hasUpdates) {
+                    saveProgress();
+                    if (appState.viewMode === 'selected') renderGallery();
+                    hasUpdates = false; 
+                }
+                await new Promise(r => setTimeout(r, 150)); 
             }
         }
 
@@ -952,7 +954,7 @@
                 let fetchedFiles = []; let nextPageToken = "";
                 const query = encodeURIComponent(`'${targetFolderId}' in parents and trashed=false`);
                 do {
-                    let apiUrl = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=nextPageToken,files(id,name,mimeType,thumbnailLink)&key=${CONFIG_APP.googleApiKey}&pageSize=1000`;
+                    let apiUrl = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=nextPageToken,files(id,name,mimeType,thumbnailLink)&key=${CONFIG_APP.googleApiKey}&pageSize=1000&includeItemsFromAllDrives=true&supportsAllDrives=true`;
                     if (nextPageToken) apiUrl += `&pageToken=${nextPageToken}`;
                     const response = await fetch(apiUrl);
                     const data = await response.json();
@@ -964,11 +966,29 @@
                     appState.folders = fetchedFiles.filter(f => f.mimeType === 'application/vnd.google-apps.folder');
                     let photoFiles = fetchedFiles.filter(f => f.mimeType !== 'application/vnd.google-apps.folder' && f.thumbnailLink);
                     
-                    appState.photos = photoFiles.map(f => ({ 
-                        id: f.id, name: f.name, folderName: fullFolderPath,
-                        url: f.thumbnailLink?.replace('=s220', '=s500'), 
-                        fullUrl: f.thumbnailLink?.replace('=s220', '=s1600') 
-                    }));
+                    let syncRequired = false;
+                    appState.photos = photoFiles.map(f => {
+                        const newUrl = f.thumbnailLink?.replace('=s220', '=s500');
+                        const newFullUrl = f.thumbnailLink?.replace('=s220', '=s1600');
+
+                        if (appState.selectedMap.has(f.id)) {
+                            const p = appState.selectedMap.get(f.id);
+                            if (p.url !== newUrl) {
+                                p.url = newUrl;
+                                p.fullUrl = newFullUrl;
+                                appState.selectedMap.set(f.id, p);
+                                syncRequired = true;
+                            }
+                        }
+
+                        return { 
+                            id: f.id, name: f.name, folderName: fullFolderPath,
+                            url: newUrl, 
+                            fullUrl: newFullUrl 
+                        };
+                    });
+                    
+                    if (syncRequired) saveProgress(); 
                     appState.originalPhotos = [...appState.photos];
                     
                     renderFolders(); 
@@ -1151,7 +1171,6 @@
                     overlay.appendChild(noteBadge);
                 }
 
-                // PENERAPAN CANVAS WATERMARK DI GRID
                 if (appState.isWatermarked && appState.watermarkDataUrl_Small) {
                     const wmOverlay = document.createElement('div');
                     wmOverlay.className = "watermark-overlay";
@@ -1362,7 +1381,6 @@
                     wrapper.classList.remove('opacity-0', 'scale-95'); 
                     wrapper.classList.add('opacity-100', 'scale-100');
 
-                    // PENERAPAN CANVAS WATERMARK DI LIGHTBOX
                     if (appState.isWatermarked && appState.watermarkDataUrl_Large) {
                         const lbWm = document.getElementById('lightboxWatermark');
                         lbWm.style.backgroundImage = `url(${appState.watermarkDataUrl_Large})`;
@@ -1388,7 +1406,6 @@
                 wrapper.classList.remove('opacity-0', 'scale-95');
                 wrapper.classList.add('opacity-100', 'scale-100');
 
-                // PENERAPAN CANVAS WATERMARK DI LIGHTBOX
                 if (appState.isWatermarked && appState.watermarkDataUrl_Large) {
                     const lbWm = document.getElementById('lightboxWatermark');
                     lbWm.style.backgroundImage = `url(${appState.watermarkDataUrl_Large})`;
